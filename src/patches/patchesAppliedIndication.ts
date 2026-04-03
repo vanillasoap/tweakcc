@@ -36,23 +36,33 @@ export const findVersionOutputLocation = (
 const findTweakccVersionLocation = (
   fileContents: string
 ): LocationResult | null => {
-  // Find Claude Code version display
-  const pattern =
+  // CC <2.1.88: createElement(TEXT,{bold:!0},"Claude Code")," ",createElement(TEXT,{dimColor:!0},"v",VERSION)
+  const oldPattern =
     /[^$\w]([$\w]+)\.createElement\(([$\w]+),\{bold:!0\},"Claude Code"\)," ",([$\w]+)\.createElement\(([$\w]+),\{dimColor:!0\},"v",[$\w]+\)/;
-  const match = fileContents.match(pattern);
-  if (!match || match.index === undefined) {
-    console.error(
-      'patch: patchesAppliedIndication: failed to find Claude Code version pattern'
-    );
-    return null;
+  const oldMatch = fileContents.match(oldPattern);
+  if (oldMatch && oldMatch.index !== undefined) {
+    return {
+      startIndex: oldMatch.index + oldMatch[0].length,
+      endIndex: oldMatch.index + oldMatch[0].length,
+    };
   }
 
-  // Insert right after this match
-  const insertIndex = match.index + match[0].length;
-  return {
-    startIndex: insertIndex,
-    endIndex: insertIndex,
-  };
+  // CC ≥2.1.88: "Claude Code" is memoized into a variable
+  // createElement(T,null,VAR," ",createElement(T,{dimColor:!0},"v",VERSION))
+  const newPattern =
+    /[^$\w]([$\w]+)\.createElement\(([$\w]+),null,[$\w]+," ",\1\.createElement\(\2,\{dimColor:!0\},"v",[$\w]+\)\)/;
+  const newMatch = fileContents.match(newPattern);
+  if (newMatch && newMatch.index !== undefined) {
+    return {
+      startIndex: newMatch.index + newMatch[0].length,
+      endIndex: newMatch.index + newMatch[0].length,
+    };
+  }
+
+  console.error(
+    'patch: patchesAppliedIndication: failed to find Claude Code version pattern'
+  );
+  return null;
 };
 
 /**
@@ -178,24 +188,66 @@ const applyIndicatorPatchesListPatch = (
   chalkVar: string,
   patchesApplies: string[]
 ): string | null => {
-  // Start stack machine at level = 5
-  let level = 4; // This right at the very end of the header component, right after the debug banner.
-  let currentIndex = startIndex;
+  // Find the insertion point: just before the final `return` of the enclosing function.
+  // First try the stack machine approach (works for CC <2.1.88).
   let insertionIndex = -1;
+  let level = 4;
+  let currentIndex = startIndex;
 
-  while (currentIndex < fileContents.length) {
+  while (
+    currentIndex < fileContents.length &&
+    currentIndex < startIndex + 5000
+  ) {
     const ch = fileContents[currentIndex];
     if (ch === '(') {
       level++;
     } else if (ch === ')') {
       if (level === 1) {
-        // Found the location - this is where we add the patches list
         insertionIndex = currentIndex;
         break;
       }
       level--;
     }
     currentIndex++;
+  }
+
+  // CC ≥2.1.88: stack machine fails due to memo cache nesting changes.
+  // Fall back to finding the enclosing function's final `return` statement.
+  if (insertionIndex === -1) {
+    // Walk backwards from alignItems to find the function start
+    const lookbackStart = Math.max(0, startIndex - 8000);
+    const lookback = fileContents.slice(lookbackStart, startIndex);
+    const funcMatches = Array.from(lookback.matchAll(/function [$\w]+\(/g));
+    if (funcMatches.length > 0) {
+      const lastFunc = funcMatches[funcMatches.length - 1];
+      const funcStartAbs = lookbackStart + lastFunc.index!;
+
+      // Find function end by brace matching
+      let braceDepth = 0;
+      let braceStarted = false;
+      for (
+        let i = funcStartAbs;
+        i < fileContents.length && i < funcStartAbs + 30000;
+        i++
+      ) {
+        if (fileContents[i] === '{') {
+          braceDepth++;
+          braceStarted = true;
+        }
+        if (fileContents[i] === '}') {
+          braceDepth--;
+        }
+        if (braceStarted && braceDepth === 0) {
+          // Find last `return ` before function end
+          const funcBody = fileContents.slice(funcStartAbs, i);
+          const lastReturnIdx = funcBody.lastIndexOf('return ');
+          if (lastReturnIdx !== -1) {
+            insertionIndex = funcStartAbs + lastReturnIdx;
+          }
+          break;
+        }
+      }
+    }
   }
 
   if (insertionIndex === -1) {
@@ -246,10 +298,13 @@ const applyIndicatorPatchesListPatch = (
 const findPatchesListLocation = (
   fileContents: string
 ): LocationResult | null => {
-  // 1. Find the same regex as patch 2
-  const pattern =
+  // 1. Find the Claude Code version display (same patterns as patch 2)
+  const oldPattern =
     /[^$\w]([$\w]+)\.createElement\(([$\w]+),\{bold:!0\},"Claude Code"\)," ",([$\w]+)\.createElement\(([$\w]+),\{dimColor:!0\},"v",[$\w]+\)/;
-  const match = fileContents.match(pattern);
+  const newPattern =
+    /[^$\w]([$\w]+)\.createElement\(([$\w]+),null,[$\w]+," ",\1\.createElement\(\2,\{dimColor:!0\},"v",[$\w]+\)\)/;
+  const match =
+    fileContents.match(oldPattern) ?? fileContents.match(newPattern);
   if (!match || match.index === undefined) {
     console.error(
       'patch: patchesAppliedIndication: failed to find Claude Code version pattern for patch 3'

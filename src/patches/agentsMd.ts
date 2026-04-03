@@ -51,6 +51,44 @@ export const writeAgentsMd = (
   file: string,
   altNames: string[]
 ): string | null => {
+  // CC ≥2.1.88: File I/O moved to async caller function xu1.
+  // Pattern: async function NAME(path,type,parent){try{let V=await FS().readFile(path,...);return READER(V,path,type,parent)}catch(E){...}}
+  const asyncCallerPattern =
+    /(async function ([$\w]+)\(([$\w]+),([$\w]+),([$\w]+)\)\{try\{let ([$\w]+)=await ([$\w]+)\(\)\.readFile\(\3,\{encoding:"utf-8"\}\);return ([$\w]+)\(\6,\3,\4,\5\)\}catch\(([$\w]+)\)\{)/;
+
+  const asyncMatch = file.match(asyncCallerPattern);
+  if (asyncMatch && asyncMatch.index !== undefined) {
+    return writeAgentsMdAsync(file, altNames, asyncMatch);
+  }
+
+  // CC <2.1.88: File I/O in the reader function itself
+  return writeAgentsMdSync(file, altNames);
+};
+
+const writeAgentsMdAsync = (
+  file: string,
+  altNames: string[],
+  asyncMatch: RegExpMatchArray
+): string | null => {
+  const pathParam = asyncMatch[3];
+  const typeParam = asyncMatch[4];
+  const parentParam = asyncMatch[5];
+  const fsExpr = asyncMatch[7];
+  const errorVar = asyncMatch[9];
+  const catchStart = asyncMatch.index! + asyncMatch[1].length;
+
+  const altNamesJson = JSON.stringify(altNames);
+
+  // Inject fallback inside the catch block: on ENOENT, try alt filenames
+  const fallback = `{let _ec=typeof ${errorVar}==="object"&&${errorVar}!==null&&"code"in ${errorVar}?${errorVar}.code:"";if((_ec==="ENOENT"||_ec==="EISDIR")&&(${pathParam}.endsWith("/CLAUDE.md")||${pathParam}.endsWith("\\\\CLAUDE.md"))){for(let alt of ${altNamesJson}){let altPath=${pathParam}.slice(0,-9)+alt;try{let _c=await ${fsExpr}().readFile(altPath,{encoding:"utf-8"});return ${asyncMatch[8]}(_c,altPath,${typeParam},${parentParam})}catch{}}}}`;
+
+  const newFile = file.slice(0, catchStart) + fallback + file.slice(catchStart);
+
+  showDiff(file, newFile, fallback, catchStart, catchStart);
+  return newFile;
+};
+
+const writeAgentsMdSync = (file: string, altNames: string[]): string | null => {
   const funcPattern =
     /(function ([$\w]+)\(([$\w]+),([^)]+?))\)(?:.|\n){0,500}Skipping non-text file in @include/;
 
