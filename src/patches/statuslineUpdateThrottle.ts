@@ -100,8 +100,16 @@ export const writeStatuslineUpdateThrottle = (
   //   Match[4]: The old debounced invocation (to be replaced)
   //   Match[5]: The function call with parameter if newer format (e.g., "I(A)")
   //   Match[6]: The argument to the function if newer format (e.g., "A")
+  // CC ≥2.1.88: setTimeout with extra args pattern
+  // Z=rM.useCallback(async...statusLineText...[q,A]),v=rM.useCallback(()=>{if(f.current!==void 0)clearTimeout(f.current);f.current=setTimeout((L,R)=>{L.current=void 0,R()},300,f,Z)},[Z])
+  //
+  // CC 2.1.42: setTimeout/clearTimeout without extra args
+  // M=vf.useCallback(()=>{if(j.current!==void 0)clearTimeout(j.current);j.current=setTimeout(()=>{j.current=void 0,D()},300)},[D])
+  //
+  // CC <2.1.42: external throttle function
+  // X=fXA(()=>O(A),300) or F=Ue(G,300)
   const pattern =
-    /(,([$\w]+)=([$\w]+(?:\.default)?)\.useCallback.{0,1000}statusLineText.{0,200}?),([$\w]+)=([$\w.]+\(\(\)=>(\2\(([$\w]+)\)),300\)|[$\w]+\(\2,300\)|.{0,100}\{[$\w]+\.current=void 0,\2\(\)\},300\)\},\[\2\]\))/;
+    /(,([$\w]+)=([$\w]+(?:\.default)?)\.useCallback.{0,1000}statusLineText.{0,200}?),([$\w]+)=([$\w.]+\(\(\)=>(\2\(([$\w]+)\)),300\)|[$\w]+\(\2,300\)|[$\w]+\.useCallback\(\(\)=>\{if\([$\w]+\.current!==void 0\)clearTimeout\([$\w]+\.current\);[$\w]+\.current=setTimeout\(\([$\w]+,[$\w]+\)=>\{[$\w]+\.current=void 0,[$\w]+\(\)\},300,[$\w]+,\2\)\},\[\2\]\)|.{0,100}\{[$\w]+\.current=void 0,\2\(\)\},300\)\},\[\2\]\))/;
 
   const match = oldFile.match(pattern);
 
@@ -116,14 +124,10 @@ export const writeStatuslineUpdateThrottle = (
   const statuslineUpdateFn = match[2];
   const reactVar = match[3];
   const callbackVar = match[4];
-  // match[4] is the old debounced invocation (being replaced)
-  // match[5] is the old debounced invocation (being replaced)
-  // match[6] is the function call with param if newer format (e.g., "I(A)")
-  // match[7] is the argument if newer format (e.g., "A")
 
   // Determine the function call to make
-  // Newer format: match[5] contains "I(A)"
-  // Older format: just call the function with no args
+  // Newer format with param: match[6] contains "I(A)"
+  // Older/newer without param: just call the function
   const call = match[6] ?? `${statuslineUpdateFn}()`;
   const argument = match[7];
 

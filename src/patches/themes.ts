@@ -20,8 +20,10 @@ function getThemesLocation(oldFile: string): {
 
   const objArrPat =
     /\[(?:\.\.\.\[\],)?(?:\{label:"(?:Dark|Light|Auto)[^"]*",value:"[^"]+"\},?)+\]/;
+  // CC ≥2.1.88: top-level assignment `VAR={auto:"Auto...",...}`
+  // CC <2.1.88: `return{VAR:"Auto...",...}`
   const objPat =
-    /return\{(?:(?:[$\w]+|"[^"]+"):"(?:Auto|Dark|Light)[^"]*",?)+\}/;
+    /(?:return|[$\w]+=)\{(?:(?:[$\w]+|"[^"]+"):"(?:Auto|Dark|Light)[^"]*",?)+\}/;
   const objArrMatch = oldFile.match(objArrPat);
   const objMatch = oldFile.match(objPat);
 
@@ -70,8 +72,15 @@ export const writeThemes = (
   // Process in reverse order to avoid index shifting
 
   // Update theme mapping object (obj)
+  // Preserve the prefix: either `return` or `VAR=`
+  const objOriginal = oldFile.slice(
+    locations.obj.startIndex,
+    locations.obj.endIndex
+  );
+  const prefixMatch = objOriginal.match(/^((?:return|[$\w]+=))\{/);
+  const objPrefix = prefixMatch ? prefixMatch[1] : 'return';
   const obj =
-    'return' +
+    objPrefix +
     JSON.stringify(
       Object.fromEntries(themes.map(theme => [theme.id, theme.name]))
     );

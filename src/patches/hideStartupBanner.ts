@@ -1,38 +1,63 @@
 // Please see the note about writing patches in ./index
 
-import { LocationResult, showDiff } from './index';
+import { showDiff } from './index';
 
-const getStartupBannerLocation = (oldFile: string): LocationResult | null => {
-  // Find the createElement with isBeforeFirstMessage:!1
-  const pattern =
+export const writeHideStartupBanner = (oldFile: string): string | null => {
+  // CC <2.1.88: createElement with isBeforeFirstMessage:!1
+  const oldPattern =
     /,[$\w]+\.createElement\([$\w]+,\{isBeforeFirstMessage:!1\}\),/;
-  const match = oldFile.match(pattern);
+  const oldMatch = oldFile.match(oldPattern);
 
-  if (!match || match.index === undefined) {
+  if (oldMatch && oldMatch.index !== undefined) {
+    const newFile =
+      oldFile.slice(0, oldMatch.index) +
+      ',' +
+      oldFile.slice(oldMatch.index + oldMatch[0].length);
+
+    showDiff(
+      oldFile,
+      newFile,
+      ',',
+      oldMatch.index,
+      oldMatch.index + oldMatch[0].length
+    );
+    return newFile;
+  }
+
+  // CC ≥2.1.88: Find the startup banner function via "Welcome to Claude Code"
+  // string, then insert `return null;` at the function body start
+  const welcomeIdx = oldFile.indexOf('Welcome to Claude Code');
+  if (welcomeIdx === -1) {
     console.error(
       'patch: hideStartupBanner: failed to find startup banner createElement'
     );
     return null;
   }
 
-  return {
-    startIndex: match.index,
-    endIndex: match.index + match[0].length,
-  };
-};
+  const lookbackStart = Math.max(0, welcomeIdx - 2000);
+  const beforeText = oldFile.slice(lookbackStart, welcomeIdx);
 
-export const writeHideStartupBanner = (oldFile: string): string | null => {
-  const location = getStartupBannerLocation(oldFile);
-  if (!location) {
+  // Find the LAST function declaration before "Welcome to Claude Code"
+  const functionPattern = /function [$\w]+\([$\w]+\)\{/g;
+  let lastFunctionMatch: RegExpExecArray | null = null;
+  let match: RegExpExecArray | null;
+
+  while ((match = functionPattern.exec(beforeText)) !== null) {
+    lastFunctionMatch = match;
+  }
+
+  if (!lastFunctionMatch) {
+    console.error('patch: hideStartupBanner: failed to find banner function');
     return null;
   }
 
-  // Remove the element by slicing it out (replace with just a comma to maintain syntax)
-  const newFile =
-    oldFile.slice(0, location.startIndex) +
-    ',' +
-    oldFile.slice(location.endIndex);
+  const insertIndex =
+    lookbackStart + lastFunctionMatch.index + lastFunctionMatch[0].length;
+  const insertCode = 'return null;';
 
-  showDiff(oldFile, newFile, ',', location.startIndex, location.endIndex);
+  const newFile =
+    oldFile.slice(0, insertIndex) + insertCode + oldFile.slice(insertIndex);
+
+  showDiff(oldFile, newFile, insertCode, insertIndex, insertIndex);
   return newFile;
 };

@@ -141,24 +141,36 @@ export const writeUserMessageDisplay = (
     return null;
   }
 
-  // See the older examples above.  We explictly look for and match the component and subcomponent
-  // that renders the ">" in older versions so that we can silently drop it in the replacement,
-  // removing it in versions where it's present and not failing on versions where it's not.
-  const pattern =
+  // CC ≥2.1.88: createElement(BOX,{flexDirection:"column",...},createElement(SUBCOMP,{text:VAR,...}))
+  const newPattern =
+    /(No content found in user prompt message.{0,250}?)(([$\w]+(?:\.default)?)\.createElement\(([$\w]+),\{flexDirection:"column".{0,200}?\}),\3\.createElement\([$\w]+,\{text:([$\w]+)[^}]*\}\)\)/;
+
+  const newMatch = oldFile.match(newPattern);
+
+  // CC <2.1.88: old pattern with wrap:"wrap" or {text:VAR,thinkingMetadata:VAR}
+  const oldPattern =
     /(No content found in user prompt message.{0,150}?\b)([$\w]+(?:\.default)?\.createElement.{0,30}\b[$\w]+(?:\.default)?\.createElement.{0,40}">.+?)?(([$\w]+(?:\.default)?\.createElement).{0,100})(\([$\w]+,(?:\{[^{}]+wrap:"wrap"\},([$\w]+)(?:\.trim\(\))?\)\)|\{text:([$\w]+)(?:,thinkingMetadata:[$\w]+)?\}\)\)?))/;
 
-  const match = oldFile.match(pattern);
+  const oldMatch = !newMatch ? oldFile.match(oldPattern) : null;
 
-  if (!match || match.index === undefined) {
+  let match: RegExpMatchArray | null;
+  let createElementFn: string;
+  let messageVar: string;
+
+  if (newMatch && newMatch.index !== undefined) {
+    match = newMatch;
+    createElementFn = `${newMatch[3]}.createElement`;
+    messageVar = newMatch[5];
+  } else if (oldMatch && oldMatch.index !== undefined) {
+    match = oldMatch;
+    createElementFn = oldMatch[4];
+    messageVar = oldMatch[6] ?? oldMatch[7];
+  } else {
     console.error(
       'patch: userMessageDisplay: failed to find user message display pattern'
     );
     return null;
   }
-
-  const createElementFn = match[4];
-  // Either match[6] or match[7] will be present (never both)
-  const messageVar = match[6] ?? match[7];
 
   // Build box attributes (border and padding)
   const boxAttrs: string[] = [];
@@ -241,7 +253,7 @@ export const writeUserMessageDisplay = (
     match[1] +
     `${createElementFn}(${boxComponent},${boxAttrsObjStr},${createElementFn}(${textComponent},null,${chalkFormattedString}))`;
 
-  const startIndex = match.index;
+  const startIndex = match.index!;
   const endIndex = startIndex + match[0].length;
 
   const newFile =

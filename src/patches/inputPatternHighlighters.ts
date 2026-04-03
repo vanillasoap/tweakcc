@@ -36,10 +36,46 @@ const buildChalkChain = (
 // ======================================================================
 
 const writeCustomHighlighterImpl = (oldFile: string): string | null => {
-  const regex =
+  // CC ≥2.1.88: highlight uses optional chaining and new props (dimColor, inverse)
+  // Pattern: return React.createElement(Text,{key:k,color:V.highlight?.color,dimColor:V.highlight?.dimColor,inverse:V.highlight?.inverse},React.createElement(Frag,null,V.text))
+  const newRegex =
+    /(return ([$\w]+)\.createElement\(([$\w]+),\{key:([$\w]+),color:([$\w]+)\.highlight\?\.color),dimColor:\5\.highlight\?\.dimColor,inverse:\5\.highlight\?\.inverse(\},([$\w]+)\.createElement\([$\w]+,null,)(\5\.text)(\)\))/;
+
+  const newMatches = oldFile.match(newRegex);
+  if (newMatches && newMatches.index !== undefined) {
+    const itemVar = newMatches[5];
+    const styledFormattedText = `${itemVar}.highlight.color(${newMatches[8]})`;
+
+    const replacement =
+      `if(typeof ${itemVar}.highlight.color==='function')` +
+      `return ${newMatches[2]}.createElement(${newMatches[3]},{key:${newMatches[4]}` +
+      newMatches[6] +
+      styledFormattedText +
+      newMatches[9] +
+      ';' +
+      newMatches[0];
+
+    const newFile =
+      oldFile.slice(0, newMatches.index) +
+      replacement +
+      oldFile.slice(newMatches.index + newMatches[0].length);
+
+    showDiff(
+      oldFile,
+      newFile,
+      replacement,
+      newMatches.index,
+      newMatches.index + newMatches[0].length
+    );
+
+    return newFile;
+  }
+
+  // CC <2.1.88: original pattern with highlight.color (non-optional chaining)
+  const oldRegex =
     /(if\(([$\w]+)\.highlight\?\.color\))((return [$\w]+\.createElement\([$\w]+,\{key:[$\w]+),color:[$\w]+\.highlight\.color(\},[$\w]+\.createElement\([$\w]+,null,)([$\w]+\.text)(\)\)));/;
 
-  const matches = oldFile.match(regex);
+  const matches = oldFile.match(oldRegex);
   if (!matches || matches.index === undefined) {
     console.error(
       'patch: inputPatternHighlighters: failed to find highlight?.color renderer pattern'
@@ -83,8 +119,10 @@ const writeCustomHighlighterCreation = (
   chalkVar: string,
   highlighters: InputPatternHighlighter[]
 ): string | null => {
+  // CC ≥2.1.88: `let P5=React.useMemo(()=>{let D8=[];...`
+  // CC <2.1.88: `,VAR=React.useMemo(()=>{let VAR=[];...`
   const regex =
-    /(,[$\w]+=[$\w]+\.useMemo\(\(\)=>\{let [$\w]+=\[\];)(if\([$\w]+&&[$\w]+&&![$\w]+\)([$\w]+)\.push\(\{start:[$\w]+,end:[$\w]+\+[$\w]+\.length,color:"warning",priority:\d+\})/;
+    /((?:let |,)[$\w]+=[$\w]+\.useMemo\(\(\)=>\{let [$\w]+=\[\];).{0,300}?(if\([$\w]+&&[$\w]+&&![$\w]+\)([$\w]+)\.push\(\{start:[$\w]+,end:[$\w]+\+[$\w]+\.length,color:"warning",priority:\d+\})/;
 
   const match = oldFile.match(regex);
   if (!match || match.index === undefined) {
@@ -106,17 +144,40 @@ const writeCustomHighlighterCreation = (
   }
   const reactVarFromMemo = reactMemoMatch[1];
 
+  // Find the input/display text variable used for pattern matching.
+  // CC ≥2.1.88: look for VAR=React.useMemo(()=>FUNC(INPUTVAR),[INPUTVAR])
+  //   where FUNC is one of the built-in matchers (zk8, BTK, etc.)
+  // CC <2.1.88: look for `input:VAR,` in the function signature
   const searchStart = Math.max(0, match.index - 4000);
   const searchWindow = oldFile.slice(searchStart, match.index);
-  const inputPattern = /\binput:([$\w]+),/;
-  const inputMatch = searchWindow.match(inputPattern);
-  if (!inputMatch) {
+
+  let inputVar: string | null = null;
+
+  // Method 1: Find display text variable from existing matcher useMemo calls
+  const displayTextPattern =
+    /[$\w]+=[$\w]+\.useMemo\(\(\)=>[$\w]+\(([$\w]+)\),\[\1\]\)/;
+  const displayTextMatch = searchWindow.match(displayTextPattern);
+  if (displayTextMatch) {
+    inputVar = displayTextMatch[1];
+  }
+
+  // Method 2: Fall back to `input:VAR,` in function signature (wider search)
+  if (!inputVar) {
+    const widerSearchStart = Math.max(0, match.index - 8000);
+    const widerWindow = oldFile.slice(widerSearchStart, match.index);
+    const inputPropPattern = /\binput:([$\w]+),/;
+    const inputMatch = widerWindow.match(inputPropPattern);
+    if (inputMatch) {
+      inputVar = inputMatch[1];
+    }
+  }
+
+  if (!inputVar) {
     console.error(
       'patch: inputPatternHighlighters: failed to find input variable pattern'
     );
     return null;
   }
-  const inputVar = inputMatch[1];
 
   let useMemoCode = '';
   for (let i = 0; i < highlighters.length; i++) {

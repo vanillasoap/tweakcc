@@ -18,23 +18,37 @@ import { showDiff, LocationResult } from './index';
  */
 const getNonBlockingCheckLocation = (
   oldFile: string
-): LocationResult | null => {
-  // Match: !VARNAME(process.env.MCP_CONNECTION_NONBLOCKING)
-  // The variable name changes between npm/native builds, so we match any identifier
-  const pattern = /![$\w]+\(process\.env\.MCP_CONNECTION_NONBLOCKING\)/;
-  const match = oldFile.match(pattern);
+): (LocationResult & { format: 'negated' | 'assigned' }) | null => {
+  // CC <2.1.88: inline negation `!fn(process.env.MCP_CONNECTION_NONBLOCKING)`
+  const negatedPattern = /![$\w]+\(process\.env\.MCP_CONNECTION_NONBLOCKING\)/;
+  const negatedMatch = oldFile.match(negatedPattern);
 
-  if (!match || match.index === undefined) {
-    console.error(
-      'patch: mcpStartup: failed to find MCP_CONNECTION_NONBLOCKING check'
-    );
-    return null;
+  if (negatedMatch && negatedMatch.index !== undefined) {
+    return {
+      startIndex: negatedMatch.index,
+      endIndex: negatedMatch.index + negatedMatch[0].length,
+      format: 'negated',
+    };
   }
 
-  return {
-    startIndex: match.index,
-    endIndex: match.index + match[0].length,
-  };
+  // CC ≥2.1.88: assigned to variable `VAR=fn(process.env.MCP_CONNECTION_NONBLOCKING)`
+  // then used as `if(VAR){...}`. Replace the assignment value with `true`.
+  const assignedPattern =
+    /([$\w]+)=[$\w]+\(process\.env\.MCP_CONNECTION_NONBLOCKING\)/;
+  const assignedMatch = oldFile.match(assignedPattern);
+
+  if (assignedMatch && assignedMatch.index !== undefined) {
+    return {
+      startIndex: assignedMatch.index,
+      endIndex: assignedMatch.index + assignedMatch[0].length,
+      format: 'assigned',
+    };
+  }
+
+  console.error(
+    'patch: mcpStartup: failed to find MCP_CONNECTION_NONBLOCKING check'
+  );
+  return null;
 };
 
 /**
@@ -79,8 +93,20 @@ export const writeMcpNonBlocking = (oldFile: string): string | null => {
     return null;
   }
 
-  // Replace the check with "false" to force non-blocking mode
-  const newValue = 'false';
+  // For negated format: replace `!fn(...)` with `false` (double negation → true)
+  // For assigned format: replace `VAR=fn(...)` with `VAR=true`
+  let newValue: string;
+  if (location.format === 'assigned') {
+    const assignedPattern =
+      /([$\w]+)=[$\w]+\(process\.env\.MCP_CONNECTION_NONBLOCKING\)/;
+    const assignedMatch = oldFile
+      .slice(location.startIndex, location.endIndex)
+      .match(assignedPattern);
+    newValue = `${assignedMatch![1]}=true`;
+  } else {
+    newValue = 'false';
+  }
+
   const newFile =
     oldFile.slice(0, location.startIndex) +
     newValue +
