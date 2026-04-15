@@ -326,7 +326,18 @@ export const findBoxComponent = (fileContents: string): string | undefined => {
     return directReturnMatch[1];
   }
 
-  // Method 3: Search for Box displayName (older CC versions, 0.2.9 - 2.0.77 at least)
+  // Method 3: Find Box with React Compiler memo cache (CC 2.1.88+)
+  // Pattern: function NAME(q){let K=Y6(NN),...createElement("ink-box",...
+  // The Box component uses a large memo cache (30+ slots) and contains
+  // props like tabIndex, autoFocus, onClick, onFocus, onBlur
+  const memoCachePattern =
+    /function ([$\w]+)\([$\w]+\)\{let [$\w]+=[$\w]+\(\d{2,}\).{0,4000}?\.createElement\("ink-box"/;
+  const memoCacheMatch = fileContents.match(memoCachePattern);
+  if (memoCacheMatch) {
+    return memoCacheMatch[1];
+  }
+
+  // Method 4: Search for Box displayName (older CC versions, 0.2.9 - 2.0.77 at least)
   const boxDisplayNamePattern = /[^$\w]([$\w]+)\.displayName="Box"/;
   const boxDisplayNameMatch = fileContents.match(boxDisplayNamePattern);
   if (boxDisplayNameMatch) {
