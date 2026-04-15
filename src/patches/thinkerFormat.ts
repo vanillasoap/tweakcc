@@ -5,7 +5,11 @@ import { LocationResult, showDiff } from './index';
 const getThinkerFormatLocation = (oldFile: string): LocationResult | null => {
   const approxAreaPattern =
     /spinnerTip:[$\w]+,(?:[$\w]+:[$\w]+,)*overrideMessage:[$\w]+,.{300}/;
-  const approxAreaMatch = oldFile.match(approxAreaPattern);
+  // CC 2.1.109+: spinnerTip is read from a Zustand store selector (`.spinnerTip)`)
+  // rather than destructured alongside overrideMessage.
+  const approxAreaPatternNew = /\.spinnerTip\)/;
+  const approxAreaMatch =
+    oldFile.match(approxAreaPattern) ?? oldFile.match(approxAreaPatternNew);
 
   if (!approxAreaMatch || approxAreaMatch.index == undefined) {
     console.error('patch: thinker format: failed to find approxAreaMatch');

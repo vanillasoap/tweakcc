@@ -1,51 +1,67 @@
 // Please see the note about writing patches in ./index
 
-import { LocationResult, showDiff } from './index';
+import { showDiff } from './index';
 
-const getVerbosePropertyLocation = (oldFile: string): LocationResult | null => {
+type VerbosePatch = {
+  startIndex: number;
+  endIndex: number;
+  newCode: string;
+};
+
+const getVerbosePatch = (oldFile: string): VerbosePatch | null => {
   const createElementPattern =
     /createElement\([$\w]+,\{[^}]+spinnerTip[^}]+overrideMessage[^}]+\}/;
   const createElementMatch = oldFile.match(createElementPattern);
 
-  if (!createElementMatch || createElementMatch.index === undefined) {
-    console.error(
-      'patch: verbose: failed to find createElement with spinnerTip and overrideMessage'
-    );
-    return null;
+  if (createElementMatch && createElementMatch.index !== undefined) {
+    const extractedString = createElementMatch[0];
+    const verbosePattern = /verbose:[^,}]+/;
+    const verboseMatch = extractedString.match(verbosePattern);
+
+    if (verboseMatch && verboseMatch.index !== undefined) {
+      const startIndex = createElementMatch.index + verboseMatch.index;
+      return {
+        startIndex,
+        endIndex: startIndex + verboseMatch[0].length,
+        newCode: 'verbose:true',
+      };
+    }
   }
 
-  const extractedString = createElementMatch[0];
+  // CC 2.1.109+: spinner component receives verbose via function-param
+  // destructuring; override the local binding at the top of the function body.
+  const destructurePattern =
+    /verbose:([$\w]+),hasActiveTools:[$\w]+=!1,leaderIsIdle:[$\w]+=!1\}\)\{/;
+  const destructureMatch = oldFile.match(destructurePattern);
 
-  const verbosePattern = /verbose:[^,}]+/;
-  const verboseMatch = extractedString.match(verbosePattern);
-
-  if (!verboseMatch || verboseMatch.index === undefined) {
-    console.error('patch: verbose: failed to find verbose property');
-    return null;
+  if (destructureMatch && destructureMatch.index !== undefined) {
+    const varName = destructureMatch[1];
+    const startIndex = destructureMatch.index;
+    const endIndex = startIndex + destructureMatch[0].length;
+    return {
+      startIndex,
+      endIndex,
+      newCode: `${destructureMatch[0]}${varName}=!0;`,
+    };
   }
 
-  // Calculate absolute positions in the original file
-  const absoluteVerboseStart = createElementMatch.index + verboseMatch.index;
-  const absoluteVerboseEnd = absoluteVerboseStart + verboseMatch[0].length;
-
-  return {
-    startIndex: absoluteVerboseStart,
-    endIndex: absoluteVerboseEnd,
-  };
+  console.error(
+    'patch: verbose: failed to find createElement with spinnerTip and overrideMessage'
+  );
+  return null;
 };
 
 export const writeVerboseProperty = (oldFile: string): string | null => {
-  const location = getVerbosePropertyLocation(oldFile);
-  if (!location) {
+  const patch = getVerbosePatch(oldFile);
+  if (!patch) {
     return null;
   }
 
-  const newCode = 'verbose:true';
   const newFile =
-    oldFile.slice(0, location.startIndex) +
-    newCode +
-    oldFile.slice(location.endIndex);
+    oldFile.slice(0, patch.startIndex) +
+    patch.newCode +
+    oldFile.slice(patch.endIndex);
 
-  showDiff(oldFile, newFile, newCode, location.startIndex, location.endIndex);
+  showDiff(oldFile, newFile, patch.newCode, patch.startIndex, patch.endIndex);
   return newFile;
 };
