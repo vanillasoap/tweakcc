@@ -111,16 +111,19 @@ const patchPastSessions = (file: string): string | null => {
 
 /**
  * Patch 3: Make per-section and total file token limits configurable via env vars
+ *
+ * The 2000/12000 constants disappeared in CC 2.1.108 when the session-memory
+ * file template was restructured. Soft-fail here so the rest of session memory
+ * still applies.
  */
-const patchTokenLimits = (file: string): string | null => {
+const patchTokenLimits = (file: string): string => {
   // Pattern matches: =2000 ... =12000 ... # Session Title
   const pattern =
     /(=)2000((?:.|\n){0,15}?=)12000((?:.|\n){0,20}# Session Title)/;
   const match = file.match(pattern);
 
   if (!match || match.index === undefined) {
-    console.error('patch: sessionMemory: failed to find token limits pattern');
-    return null;
+    return file;
   }
 
   const perSectionCode = 'Number(process.env.CC_SM_PER_SECTION_TOKENS??2000)';
@@ -187,7 +190,6 @@ export const writeSessionMemory = (oldFile: string): string | null => {
   if (!newFile) return null;
 
   newFile = patchTokenLimits(newFile);
-  if (!newFile) return null;
 
   newFile = patchUpdateThresholds(newFile);
   return newFile;
