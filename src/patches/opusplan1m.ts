@@ -109,9 +109,10 @@ const patchModelAliasesList = (oldFile: string): string | null => {
  *   if (A === "opusplan[1m]") return "Opus 4.6 in plan mode, else Sonnet 4.6 (1M context)";
  */
 const patchDescriptionFunction = (oldFile: string): string | null => {
-  // Pattern matches: if (VAR === "opusplan") return "Opus 4.6 in plan mode, else Sonnet 4.6";
+  // Pattern matches: if (VAR === "opusplan") return "Opus[...]in plan mode, else Sonnet[...]";
+  // CC 2.1.111+ dropped version suffixes (e.g. "Opus 4.6" -> "Opus"), so [^"]{0,30} covers both.
   const pattern =
-    /(if\s*\(\s*([$\w]+)\s*===\s*"opusplan"\s*\)\s*return\s*"Opus .{0,20} in plan mode, else Sonnet .{0,20}";)/;
+    /(if\s*\(\s*([$\w]+)\s*===\s*"opusplan"\s*\)\s*return\s*"(Opus[^"]{0,30}in plan mode, else Sonnet[^"]{0,30})";)/;
 
   const match = oldFile.match(pattern);
   if (!match || match.index === undefined) {
@@ -121,12 +122,12 @@ const patchDescriptionFunction = (oldFile: string): string | null => {
     return null;
   }
 
-  const [fullMatch, , varName] = match;
+  const [fullMatch, , varName, description] = match;
 
-  // Add the opusplan[1m] case right after the opusplan case
+  // Add the opusplan[1m] case right after the opusplan case, reusing the matched description.
   const replacement =
     fullMatch +
-    `if(${varName}==="opusplan[1m]")return"Opus 4.6 in plan mode, else Sonnet 4.6 (1M context)";`;
+    `if(${varName}==="opusplan[1m]")return"${description} (1M context)";`;
 
   const newFile =
     oldFile.slice(0, match.index) +
