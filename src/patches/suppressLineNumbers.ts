@@ -24,7 +24,7 @@ export const writeSuppressLineNumbers = (oldFile: string): string | null => {
   // CC <2.1.88: arrow branch only
   // if(VAR.length>=N)return`...→...`;return`...→...`
 
-  // Find the function by its unique signature
+  // Find the function by its unique signature (split-based, CC 2.1.88–2.1.119)
   const funcSig =
     /\{content:([$\w]+),startLine:[$\w]+\}\)\{if\(!\1\)return"";let ([$\w]+)=\1\.split\([^)]+\);/;
   const sigMatch = oldFile.match(funcSig);
@@ -38,6 +38,31 @@ export const writeSuppressLineNumbers = (oldFile: string): string | null => {
     const afterSplit = oldFile.slice(replaceStart);
     const endPattern = /\}(?=function |var |let |const |[$\w]+=[$\w]+\()/;
     const endMatch = afterSplit.match(endPattern);
+
+    if (endMatch && endMatch.index !== undefined) {
+      const replaceEnd = replaceStart + endMatch.index;
+      const newCode = `return ${contentVar}`;
+      const newFile =
+        oldFile.slice(0, replaceStart) + newCode + oldFile.slice(replaceEnd);
+      showDiff(oldFile, newFile, newCode, replaceStart, replaceEnd);
+      return newFile;
+    }
+  }
+
+  // CC 2.1.121+: indexOf-based loop instead of split
+  // Pattern: {content:VAR,startLine:VAR}){if(!VAR)return"";let A=fn(),q=[],...}
+  const indexOfSig =
+    /\{content:([$\w]+),startLine:[$\w]+\}\)\{if\(!\1\)return"";(let [$\w]+=[$\w]+\(\))/;
+  const indexOfMatch = oldFile.match(indexOfSig);
+
+  if (indexOfMatch && indexOfMatch.index !== undefined) {
+    const contentVar = indexOfMatch[1];
+    const replaceStart =
+      indexOfMatch.index + indexOfMatch[0].length - indexOfMatch[2].length;
+
+    const afterSig = oldFile.slice(replaceStart);
+    const endPattern = /\}(?=function |var |let |const |[$\w]+=[$\w]+\()/;
+    const endMatch = afterSig.match(endPattern);
 
     if (endMatch && endMatch.index !== undefined) {
       const replaceEnd = replaceStart + endMatch.index;

@@ -337,6 +337,15 @@ export const findBoxComponent = (fileContents: string): string | undefined => {
     return memoCacheMatch[1];
   }
 
+  // Method 4a: Destructured-props Box (CC 2.1.121+)
+  // Pattern: function NAME({children:VAR,ref:VAR,tabIndex:VAR,autoFocus:VAR,...REST}){...createElement("ink-box"
+  const destructuredBoxPattern =
+    /function ([$\w]+)\(\{children:[$\w]+,ref:[$\w]+,tabIndex:[$\w]+,autoFocus:[$\w]+.{0,1500}?createElement\("ink-box"/;
+  const destructuredBoxMatch = fileContents.match(destructuredBoxPattern);
+  if (destructuredBoxMatch) {
+    return destructuredBoxMatch[1];
+  }
+
   // Method 4: Search for Box displayName (older CC versions, 0.2.9 - 2.0.77 at least)
   const boxDisplayNamePattern = /[^$\w]([$\w]+)\.displayName="Box"/;
   const boxDisplayNameMatch = fileContents.match(boxDisplayNamePattern);
